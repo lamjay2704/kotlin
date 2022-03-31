@@ -8,6 +8,8 @@ package org.jetbrains.kotlin.backend.jvm.lower
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
 import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
+import org.jetbrains.kotlin.backend.common.pop
+import org.jetbrains.kotlin.backend.common.push
 import org.jetbrains.kotlin.backend.jvm.InlineClassAbi
 import org.jetbrains.kotlin.backend.jvm.JvmBackendContext
 import org.jetbrains.kotlin.backend.jvm.MemoizedValueClassAbstractReplacements
@@ -15,22 +17,16 @@ import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.irReturn
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
-import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.transformStatement
-import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.ir.util.constructedClass
+import org.jetbrains.kotlin.ir.util.parentAsClass
+import org.jetbrains.kotlin.ir.util.patchDeclarationParents
+import org.jetbrains.kotlin.ir.util.transformFlat
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 
 internal abstract class JvmValueClassAbstractLowering(val context: JvmBackendContext) : FileLoweringPass,
     IrElementTransformerVoidWithContext() {
     abstract val replacements: MemoizedValueClassAbstractReplacements
-
-    protected val valueMap = mutableMapOf<IrValueSymbol, IrValueDeclaration>()
-
-    private fun addBindingsFor(original: IrFunction, replacement: IrFunction) {
-        for ((param, newParam) in original.explicitParameters.zip(replacement.explicitParameters)) {
-            valueMap[param.symbol] = newParam
-        }
-    }
 
     final override fun lower(irFile: IrFile) {
         irFile.transformChildrenVoid()
@@ -38,40 +34,11 @@ internal abstract class JvmValueClassAbstractLowering(val context: JvmBackendCon
 
     abstract fun IrClass.isSpecificLoweringLogicApplicable(): Boolean
 
-    abstract fun IrFunction.isSpecificFieldGetter(): Boolean
+    abstract fun IrFunction.isFieldGetterToRemove(): Boolean
 
-    final override fun visitClassNew(declaration: IrClass): IrStatement {
-        // The arguments to the primary constructor are in scope in the initializers of IrFields.
-        declaration.primaryConstructor?.let {
-            replacements.getReplacementFunction(it)?.let { replacement -> addBindingsFor(it, replacement) }
-        }
+    abstract override fun visitClassNew(declaration: IrClass): IrStatement
 
-        declaration.transformDeclarationsFlat { memberDeclaration ->
-            if (memberDeclaration is IrFunction) {
-                withinScope(memberDeclaration) {
-                    transformFunctionFlat(memberDeclaration)
-                }
-            } else {
-                memberDeclaration.accept(this, null)
-                null
-            }
-        }
-
-        if (declaration.isSpecificLoweringLogicApplicable()) {
-            val irConstructor = declaration.primaryConstructor!!
-            // The field getter is used by reflection and cannot be removed here unless it is internal.
-            declaration.declarations.removeIf {
-                it == irConstructor || (it is IrFunction && it.isSpecificFieldGetter() && !it.visibility.isPublicAPI)
-            }
-            buildPrimaryValueClassConstructor(declaration, irConstructor)
-            buildBoxFunction(declaration)
-            buildUnboxFunctions(declaration)
-            buildSpecializedEqualsMethod(declaration)
-            addJvmInlineAnnotation(declaration)
-        }
-
-        return declaration
-    }
+    abstract fun handleSpecificNewClass(declaration: IrClass)
 
     protected fun transformFunctionFlat(function: IrFunction): List<IrDeclaration>? {
         if (function is IrConstructor && function.isPrimary && function.constructedClass.isSpecificLoweringLogicApplicable()) {
@@ -96,7 +63,7 @@ internal abstract class JvmValueClassAbstractLowering(val context: JvmBackendCon
         addBindingsFor(function, replacement)
         return when (function) {
             is IrSimpleFunction -> transformSimpleFunctionFlat(function, replacement)
-            is IrConstructor -> transformConstructorFlat(function, replacement)
+            is IrConstructor -> transformSecondaryConstructorFlat(function, replacement)
             else -> throw IllegalStateException()
         }
     }
@@ -107,19 +74,26 @@ internal abstract class JvmValueClassAbstractLowering(val context: JvmBackendCon
         context.state.useOldManglingSchemeForFunctionsWithInlineClassesInSignatures
     )
 
-    protected abstract fun transformConstructorFlat(constructor: IrConstructor, replacement: IrSimpleFunction): List<IrDeclaration>
+    protected abstract fun transformSecondaryConstructorFlat(constructor: IrConstructor, replacement: IrSimpleFunction): List<IrDeclaration>
 
-    protected abstract fun transformSimpleFunctionFlat(function: IrSimpleFunction, replacement: IrSimpleFunction): List<IrDeclaration>
+    private fun transformSimpleFunctionFlat(function: IrSimpleFunction, replacement: IrSimpleFunction): List<IrDeclaration> {
+        replacement.valueParameters.forEach {
+            it.transformChildrenVoid()
+            it.defaultValue?.patchDeclarationParents(replacement)
+        }
+        allScopes.push(createScope(function))
+        replacement.body = function.body?.transform(this, null)?.patchDeclarationParents(replacement)
+        allScopes.pop()
+        replacement.copyAttributes(function)
 
-    protected abstract fun buildPrimaryValueClassConstructor(valueClass: IrClass, irConstructor: IrConstructor)
+        // Don't create a wrapper for functions which are only used in an unboxed context
+        if (function.overriddenSymbols.isEmpty() || replacement.dispatchReceiverParameter != null)
+            return listOf(replacement)
 
-    protected abstract fun buildBoxFunction(valueClass: IrClass)
+        val bridgeFunction = createBridgeFunction(function, replacement)
 
-    protected abstract fun buildUnboxFunctions(valueClass: IrClass)
-
-    protected abstract fun buildSpecializedEqualsMethod(valueClass: IrClass) // todo hashCode
-
-    protected abstract fun addJvmInlineAnnotation(valueClass: IrClass)
+        return listOfNotNull(replacement, bridgeFunction)
+    }
 
     final override fun visitReturn(expression: IrReturn): IrExpression {
         expression.returnTargetSymbol.owner.safeAs<IrFunction>()?.let { target ->
@@ -136,12 +110,19 @@ internal abstract class JvmValueClassAbstractLowering(val context: JvmBackendCon
         return super.visitReturn(expression)
     }
 
-    private fun visitStatementContainer(container: IrStatementContainer) {
+    protected open fun visitStatementContainer(container: IrStatementContainer) {
         container.statements.transformFlat { statement ->
-            if (statement is IrFunction)
-                transformFunctionFlat(statement)
-            else
-                listOf(statement.transformStatement(this))
+            when (statement) {
+                is IrFunction -> transformFunctionFlat(statement)
+                is IrVariable -> {
+                    val transformed = statement.transformStatement(this)
+                    if (transformed is IrStatementContainer)
+                        transformed.statements
+                    else
+                        listOf(transformed)
+                }
+                else -> listOf(statement.transformStatement(this))
+            }
         }
     }
 
@@ -162,4 +143,11 @@ internal abstract class JvmValueClassAbstractLowering(val context: JvmBackendCon
         else
             super.visitAnonymousInitializerNew(declaration)
 
+    protected abstract fun addBindingsFor(original: IrFunction, replacement: IrFunction)
+    protected abstract fun createBridgeFunction(function: IrSimpleFunction, replacement: IrSimpleFunction): IrSimpleFunction?
+
+    protected fun typedArgumentList(function: IrFunction, expression: IrMemberAccessExpression<*>) = listOfNotNull(
+        function.dispatchReceiverParameter?.let { it to expression.dispatchReceiver },
+        function.extensionReceiverParameter?.let { it to expression.extensionReceiver }
+    ) + function.valueParameters.map { it to expression.getValueArgument(it.index) }
 }
