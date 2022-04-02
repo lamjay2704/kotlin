@@ -674,17 +674,18 @@ abstract class KotlinCompile @Inject constructor(
                 task.kotlinOptions.moduleName ?: task.parentKotlinOptionsImpl.orNull?.moduleName ?: compilation.moduleName
             })
 
-            if (properties.useClasspathSnapshot) {
+            val useClasspathSnapshot = properties.useClasspathSnapshot
+            task.classpathSnapshotProperties.useClasspathSnapshot.value(useClasspathSnapshot).disallowChanges()
+            if (useClasspathSnapshot) {
                 val classpathSnapshot = task.project.configurations.getByName(classpathSnapshotConfigurationName(task.name))
                 task.classpathSnapshotProperties.classpathSnapshot.from(
                     classpathSnapshot.incoming.artifactView {
                         it.attributes.attribute(ARTIFACT_TYPE_ATTRIBUTE, CLASSPATH_ENTRY_SNAPSHOT_ARTIFACT_TYPE)
                     }.files
-                )
-                val classpathSnapshotDir = getClasspathSnapshotDir(task)
-                task.classpathSnapshotProperties.classpathSnapshotDir.value(classpathSnapshotDir).disallowChanges()
+                ).disallowChanges()
+                task.classpathSnapshotProperties.classpathSnapshotDir.value(getClasspathSnapshotDir(task)).disallowChanges()
             } else {
-                task.classpathSnapshotProperties.classpath.from(task.project.provider { task.libraries })
+                task.classpathSnapshotProperties.classpath.from(task.project.provider { task.libraries }).disallowChanges()
             }
         }
     }
