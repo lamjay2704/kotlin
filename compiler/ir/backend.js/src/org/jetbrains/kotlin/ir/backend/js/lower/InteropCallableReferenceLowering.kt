@@ -222,21 +222,25 @@ class InteropCallableReferenceLowering(val context: JsIrBackendContext) : BodyLo
         )
     }
 
-    private fun capturedFieldsToParametersMap(constructor: IrConstructor, factoryFunction: IrSimpleFunction): Map<IrFieldSymbol, IrValueParameterSymbol> {
-        val statements = constructor.body?.let { it.cast<IrBlockBody>().statements }
+    /**
+     * Returns a mapping from a lambda class field to the corresponding captured value.
+     *
+     * [remapVP] accepts a lambda constructor's value parameter symbol, for which it should return the corresponding captured value.
+     */
+    private fun <Symbol : IrSymbol> remapCapturedFields(
+        lambdaConstructor: IrConstructor,
+        remapVP: (IrValueParameterSymbol) -> Symbol
+    ): Map<IrFieldSymbol, Symbol> {
+        val statements = lambdaConstructor.body?.let { it.cast<IrBlockBody>().statements }
             ?: compilationException(
                 "Expecting Body for function ref constructor",
-                constructor
+                lambdaConstructor
             )
-
-        val fieldSetters = statements.filterIsInstance<IrSetField>()
+        return statements
+            .asSequence()
+            .filterIsInstance<IrSetField>()
             .filter { it.origin == LoweredStatementOrigins.STATEMENT_ORIGIN_INITIALIZER_OF_FIELD_FOR_CAPTURED_VALUE }
-
-        fun remapVP(vp: IrValueParameterSymbol): IrValueParameterSymbol {
-            return factoryFunction.valueParameters[vp.owner.index].symbol
-        }
-
-        return fieldSetters.associate { it.symbol to remapVP(it.value.cast<IrGetValue>().symbol.cast()) }
+            .associate { it.symbol to remapVP(it.value.cast<IrGetValue>().symbol.cast()) }
     }
 
     private fun extractReferenceReflectionName(getter: IrSimpleFunction): IrExpression {
@@ -304,7 +308,7 @@ class InteropCallableReferenceLowering(val context: JsIrBackendContext) : BodyLo
 
             newDeclarations.add(lambdaInfo.lambdaClass)
         } else {
-            val fieldToParameterMapping = capturedFieldsToParametersMap(constructor, factoryFunction)
+            val fieldToParameterMapping = remapCapturedFields(constructor) { factoryFunction.valueParameters[it.owner.index].symbol }
             val oldToNewInvokeParametersMapping = lambdaInfo.createOldToNewInvokeParametersMapping(lambdaDeclaration)
             lambdaDeclaration.body =
                 inlineLambdaBody(lambdaDeclaration, lambdaInfo.invokeFun, oldToNewInvokeParametersMapping, fieldToParameterMapping)
