@@ -58,6 +58,7 @@ abstract class KaptGenerateStubsTask @Inject constructor(
             val providerFactory = kotlinCompileTask.project.providers
             task.useModuleDetection.value(kotlinCompileTask.useModuleDetection).disallowChanges()
             task.moduleName.value(kotlinCompileTask.moduleName).disallowChanges()
+            task.ownModuleName.value(kotlinCompileTask.ownModuleName).disallowChanges()
             task.libraries.from(kotlinCompileTask.libraries)
             task.kotlinTaskPluginClasspath.from(
                 providerFactory.provider { kotlinCompileTask.pluginClasspath }

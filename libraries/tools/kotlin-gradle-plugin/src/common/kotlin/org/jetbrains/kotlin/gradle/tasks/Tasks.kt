@@ -272,6 +272,7 @@ abstract class AbstractKotlinCompile<T : CommonCompilerArguments> @Inject constr
                 task.pluginClasspath.from(project.configurations.getByName(compilation.pluginConfigurationName))
             }
             task.moduleName.set(project.provider { compilation.moduleName })
+            task.ownModuleName.set(project.provider { compilation.ownModuleName })
             task.sourceSetName.set(project.provider { compilation.compilationPurpose })
             task.multiPlatformEnabled.value(
                 project.provider {
@@ -379,6 +380,9 @@ abstract class AbstractKotlinCompile<T : CommonCompilerArguments> @Inject constr
 
     @get:Input
     internal val moduleName: Property<String> = objectFactory.property(String::class.java)
+
+    @get:Input
+    internal val ownModuleName: Property<String> = objectFactory.property(String::class.java)
 
     @get:Internal
     val abiSnapshotFile
@@ -670,8 +674,8 @@ abstract class KotlinCompile @Inject constructor(
                     compileJavaTaskProvider.map { it.name }
                 )
             }
-            task.moduleName.set(task.project.provider {
-                task.kotlinOptions.moduleName ?: task.parentKotlinOptionsImpl.orNull?.moduleName ?: compilation.moduleName
+            task.ownModuleName.set(task.project.provider {
+                task.kotlinOptions.moduleName ?: task.parentKotlinOptionsImpl.orNull?.moduleName ?: compilation.ownModuleName
             })
 
             if (properties.useClasspathSnapshot) {
