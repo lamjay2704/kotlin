@@ -75,6 +75,11 @@ class IrElementToJsStatementTransformer : BaseIrElementToJsNodeTransformer<JsSta
         return expression.accept(IrElementToJsExpressionTransformer(), context).makeStmt()
     }
 
+    override fun visitFunctionExpression(expression: IrFunctionExpression, context: JsGenerationContext): JsStatement {
+        // If IrFunctionExpression is not used, the generated function cannot be anonymous.
+        return expression.function.accept(IrFunctionToJsTransformer(), context).makeStmt()
+    }
+
     override fun visitBreak(jump: IrBreak, context: JsGenerationContext): JsStatement {
         return JsBreak(context.getNameForLoop(jump.loop)?.let { JsNameRef(it) }).withSource(jump, context)
     }

@@ -46,6 +46,8 @@ interface JsCommonBackendContext : CommonBackendContext {
     val testFun: IrSimpleFunctionSymbol?
 
     fun createTestContainerFun(irFile: IrFile): IrSimpleFunction
+
+    fun doNotInlineLambda(lambdaClass: IrClass)
 }
 
 // TODO: investigate if it could be removed

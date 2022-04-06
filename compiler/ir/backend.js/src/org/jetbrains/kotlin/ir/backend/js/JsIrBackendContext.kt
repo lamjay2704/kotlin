@@ -121,6 +121,14 @@ class JsIrBackendContext(
         }
     }
 
+    private val nonInlinableLambdas: MutableSet<IrClass> = hashSetOf()
+
+    override fun doNotInlineLambda(lambdaClass: IrClass) {
+        nonInlinableLambdas.add(lambdaClass)
+    }
+
+    fun isLambdaNonInlinable(lambdaClass: IrClass) = nonInlinableLambdas.contains(lambdaClass)
+
     override val inlineClassesUtils = JsInlineClassesUtils(this)
 
     val innerClassesSupport = JsInnerClassesSupport(mapping, irFactory)

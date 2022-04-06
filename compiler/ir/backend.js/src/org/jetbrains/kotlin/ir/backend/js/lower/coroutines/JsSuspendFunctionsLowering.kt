@@ -10,8 +10,10 @@ import org.jetbrains.kotlin.backend.common.ir.isSuspend
 import org.jetbrains.kotlin.backend.common.lower.FinallyBlocksLowering
 import org.jetbrains.kotlin.ir.backend.js.JsStatementOrigins
 import org.jetbrains.kotlin.backend.common.lower.ReturnableBlockTransformer
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.backend.js.JsCommonBackendContext
 import org.jetbrains.kotlin.ir.backend.js.ir.JsIrBuilder
+import org.jetbrains.kotlin.ir.backend.js.lower.CallableReferenceLowering
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
@@ -22,6 +24,7 @@ import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.symbols.IrVariableSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.isUnit
+import org.jetbrains.kotlin.ir.util.constructedClass
 import org.jetbrains.kotlin.ir.util.explicitParameters
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.*
@@ -55,7 +58,30 @@ class JsSuspendFunctionsLowering(ctx: JsCommonBackendContext) : AbstractSuspendF
         argumentToPropertiesMap: Map<IrValueParameter, IrField>
     ) {
         val returnableBlockTransformer = ReturnableBlockTransformer(context)
-        val finallyBlockTransformer = FinallyBlocksLowering(context, context.catchAllThrowableType)
+        val finallyBlockTransformer = object : FinallyBlocksLowering(context, context.catchAllThrowableType) {
+            override fun visitTry(aTry: IrTry): IrExpression {
+
+                // TODO: Only do this if lambda inlining is enabled with a feature flag
+                // Since finally expressions are copied, we don't want to inline lambdas declared in them,
+                // as this would negatively impact the code size.
+                aTry.finallyExpression?.apply {
+                    acceptChildrenVoid(object : IrElementVisitorVoid {
+                        override fun visitElement(element: IrElement) {
+                            element.acceptChildrenVoid(this)
+                        }
+
+                        override fun visitConstructorCall(expression: IrConstructorCall) {
+                            expression.acceptChildrenVoid(this)
+                            val constructedClass = expression.symbol.owner.constructedClass
+                            if (constructedClass.origin == CallableReferenceLowering.Companion.LAMBDA_IMPL) {
+                                this@JsSuspendFunctionsLowering.context.doNotInlineLambda(constructedClass)
+                            }
+                        }
+                    })
+                }
+                return super.visitTry(aTry)
+            }
+        }
         val simplifiedFunction =
             transformingFunction.transform(finallyBlockTransformer, null).transform(returnableBlockTransformer, null) as IrFunction
 

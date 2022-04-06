@@ -59,6 +59,8 @@ class WasmBackendContext(
     override val coroutineSymbols =
         JsCommonCoroutineSymbols(symbolTable, module,this)
 
+    override fun doNotInlineLambda(lambdaClass: IrClass) {}
+
     val innerClassesSupport = JsInnerClassesSupport(mapping, irFactory)
 
     override val internalPackageFqn = FqName("kotlin.wasm")
