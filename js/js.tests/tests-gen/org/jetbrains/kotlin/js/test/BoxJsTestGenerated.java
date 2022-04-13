@@ -751,6 +751,12 @@ public class BoxJsTestGenerated extends AbstractBoxJsTest {
         }
 
         @Test
+        @TestMetadata("unitMaterializationForDynamic.kt")
+        public void testUnitMaterializationForDynamic() throws Exception {
+            runTest("js/js.translator/testData/box/coercion/unitMaterializationForDynamic.kt");
+        }
+
+        @Test
         @TestMetadata("unitMaterializationInOverriddenMethod.kt")
         public void testUnitMaterializationInOverriddenMethod() throws Exception {
             runTest("js/js.translator/testData/box/coercion/unitMaterializationInOverriddenMethod.kt");
