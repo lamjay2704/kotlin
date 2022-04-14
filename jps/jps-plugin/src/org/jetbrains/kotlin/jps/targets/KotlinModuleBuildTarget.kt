@@ -357,7 +357,7 @@ abstract class KotlinModuleBuildTarget<BuildMetaInfoType : BuildMetaInfo> intern
                 // If EAP->Non-EAP build with IC, then rebuild all kotlin
                 "Last build was compiled with EAP-plugin"
             }
-            !PluginClasspaths.equals(prevBuildMetaInfo.pluginClasspaths, buildMetaInfo.pluginClasspaths) ->
+            prevBuildMetaInfo.pluginClasspaths != buildMetaInfo.pluginClasspaths ->
                 "Plugin classpaths was changed (${PluginClasspaths.deserialize(prevBuildMetaInfo.pluginClasspaths)} -> ${
                     PluginClasspaths.deserialize(
                         buildMetaInfo.pluginClasspaths

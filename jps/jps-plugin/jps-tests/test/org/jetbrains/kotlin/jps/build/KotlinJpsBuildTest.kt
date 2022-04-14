@@ -965,7 +965,7 @@ open class KotlinJpsBuildTest : KotlinJpsBuildTestBase() {
     }
 
     @WorkingDir("KotlinProject")
-    fun testModuleRebuildOmPluginClasspathsChange() {
+    fun testModuleRebuildOnPluginClasspathsChange() {
         initProject(JVM_MOCK_RUNTIME)
         myProject.modules.forEach {
             val facet = KotlinFacetSettings()

@@ -18,39 +18,18 @@ class PluginClasspaths {
             "$jarPath-$jarHash"
         }?.joinToString(":") ?: ""
 
-        fun deserialize(str: String): Array<String> =
+        fun deserialize(str: String): List<String> =
             str.split(":")
-                .map {it.substringBeforeLast("-")}
-                .filter(String::isNotBlank).toTypedArray()
-
-        fun equals(old: String, new: String): Boolean {
-            val oldPluginClasspath = deserializeWithHashes(old)
-            val newPluginClasspath = deserializeWithHashes(new)
-
-            // compare names of existing jars and their order
-            val oldJarNames = oldPluginClasspath.keys.map { File(it).name }.toTypedArray()
-            val newJarNames = newPluginClasspath.keys.map { File(it).name }.toTypedArray()
-            if (!oldJarNames.contentEquals(newJarNames)) return false
-
-            // compare hashes
-            for (jar: String in oldPluginClasspath.keys) {
-                if (oldPluginClasspath[jar] != newPluginClasspath[jar]) return false
-            }
-
-            return true
-        }
-
-        private fun deserializeWithHashes(str: String): Map<String, String> =
-            str.split(":")
+                .map { it.substringBeforeLast("-") }
                 .filter(String::isNotBlank)
-                .associate { it.substringBeforeLast("-") to it.substringAfterLast("-") }
 
         private fun File.sha256(): String {
             val digest = MessageDigest.getInstance("SHA-256")
             DigestInputStream(this.inputStream(), digest).use { dis ->
                 val buffer = ByteArray(8192)
-                // Read all bytes:
-                while (dis.read(buffer, 0, buffer.size) != -1) {
+                var bytesRead = 0
+                while (bytesRead != -1) {
+                    bytesRead = dis.read(buffer, 0, buffer.size)
                 }
             }
             // Convert to hex:
